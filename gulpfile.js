@@ -3,6 +3,7 @@ const concat = require('gulp-concat');
 
 const files = [
   'header.js',
+  'globals.js',
   'css.js',
   'main.js'
 ].map(file => 'src/' + file)
