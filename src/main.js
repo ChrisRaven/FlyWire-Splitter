@@ -12,22 +12,45 @@ if (!document.getElementById('dock-script')) {
   document.head.appendChild(script)
 }
 
+// on the Next button
+function setTotalLength(ids) {
+  document.querySelector('#kk-splitter-next-batch-total-counter').textContent = `[${Math.ceil(ids.length / batchSize)}]`
+}
 
 function addNextButton() {
   const nextButtonWrapper = document.createElement('div')
   nextButtonWrapper.id = 'kk-splitter-next-wrapper'
+  nextButtonWrapper.draggable = true
 
   const nextButton = document.createElement('button')
   nextButton.id = 'kk-splitter-next-batch'
   nextButton.innerHTML = 'Next (<span id="kk-splitter-next-batch-batch-number">0</span>)<br /><span id="kk-splitter-next-batch-total-counter">[?]</span>'
+  nextButton.addEventListener('contextmenu', e => e.preventDefault())
 
   const saveLeftButton = document.createElement('button')
   saveLeftButton.id = 'kk-splitter-save-left'
   saveLeftButton.textContent = 'Save left'
+  saveLeftButton.addEventListener('contextmenu', e => e.preventDefault())
 
   nextButtonWrapper.appendChild(nextButton)
   nextButtonWrapper.appendChild(saveLeftButton)
   document.body.appendChild(nextButtonWrapper)
+
+  storage.get('kk-splitter-next-button-position').then(res => {
+    let top, left
+    let position = res['kk-splitter-next-button-position']
+    if (!position) {
+      top = 300
+      left = 300
+    }
+    else {
+      top = position.y
+      left = position.x
+    }
+
+    nextButtonWrapper.style.top = top + 'px'
+    nextButtonWrapper.style.left = left + 'px'
+  })
 
   let clickCounter = 0
 
@@ -35,10 +58,6 @@ function addNextButton() {
     let ids = res['kk-splitter-stored'] || []
     setTotalLength(ids)
   })
-
-  function setTotalLength(ids) {
-    nextButton.querySelector('#kk-splitter-next-batch-total-counter').textContent = `[${Math.ceil(ids.length / batchSize)}]`
-  }
 
 
   nextButton.addEventListener('click', e => {
@@ -66,6 +85,7 @@ function addNextButton() {
       }
       else {
         setTotalLength(ids)
+        numberOfStored = ids.length
       }
 
       const addSegmentsInput = document.querySelector('.add-segment input')
@@ -91,7 +111,12 @@ function addNextButton() {
 
     storage.get('kk-splitter-saved').then(res => {
       ids = res['kk-splitter-saved'] || []
-      ids.push(...newIds)
+      let batch = newIds.splice(0, 10000)
+      do {
+      ids.push(...batch)
+      batch = newIds.splice(0, 10000)
+      }
+      while (batch.length > 0)
 
       storage.set('kk-splitter-saved', ids).then(() => {
         segments.forEach(seg => seg.click())
@@ -100,6 +125,37 @@ function addNextButton() {
     })
   })
 
+  let initialX, initialY
+  let currentX, currentY
+  let moving = false
+
+  const nextWrapper = document.getElementById('kk-splitter-next-wrapper')
+
+  nextWrapper.addEventListener('mousedown', e => {
+    if (e.button !== 2) return
+    e.preventDefault()
+
+    initialX = e.clientX - nextWrapper.offsetLeft
+    initialY = e.clientY - nextWrapper.offsetTop
+    moving = true
+  })
+
+  nextWrapper.addEventListener('mousemove', e => {
+    if (!moving) return
+    if (e.buttons !== 2) return
+
+    currentX = e.clientX - initialX;
+    currentY = e.clientY - initialY;
+    nextWrapper.style.left = currentX + 'px';
+    nextWrapper.style.top = currentY + 'px';
+  })
+
+  nextWrapper.addEventListener('mouseup', e => {
+    if (e.button !== 2) return    
+
+    moving = false
+    storage.set('kk-splitter-next-button-position', {x: currentX, y: currentY})
+  })
 }
 
 
@@ -172,10 +228,12 @@ function main() {
 
   function setStoredCounter(val) {
     document.getElementById('kk-splitter-stored-counter').textContent = val
+    numberOfStored =  val
   }
 
   function setSavedCounter(val) {
     document.getElementById('kk-splitter-saved-counter').textContent = val
+    numberOfSaved = val
   }
 
   function setInitialValues() {
@@ -202,16 +260,25 @@ function main() {
       }
     })
 
+
     document.getElementById('kk-splitter-add').addEventListener('click', () => {
       const ids = getIds('kk-splitter-input')
       let stored
       storage.get('kk-splitter-stored').then(res => {
         stored = res['kk-splitter-stored'] || []
-        stored.push(...ids)
+
+        let batch = ids.splice(0, 10000)
+        do {
+        stored.push(...batch)
+        batch = ids.splice(0, 10000)
+        }
+        while (batch.length > 0)
+
         storage.set('kk-splitter-stored', stored)
       }).then(() => {
         numberOfStored = stored.length
         setStoredCounter(stored.length)
+        setTotalLength(stored)
       })
 
       document.getElementById('kk-splitter-input').value = ''
@@ -256,6 +323,7 @@ function main() {
             destroyAfterClosing: true
           }).show()
           setStoredCounter(0)
+          setTotalLength([]) // the function expects an array and takes its length, so we're passing an empty array to set the length to 0
         })
       }
     })
@@ -302,5 +370,5 @@ function main() {
         })
       }
     })
-    
+  }
 }
