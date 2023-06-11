@@ -3,7 +3,7 @@ function addCss() {
     /* "Next" button */
     #kk-splitter-next-wrapper {
       position: absolute;
-      z-index: 10;
+      z-index: 50;
       width: 250px;
       height: 90px;
     }
