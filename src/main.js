@@ -59,10 +59,24 @@ function addNextButton() {
     setTotalLength(ids)
   })
 
+  function refresh() {
+    // .querySelectorAll() to create a static NodeList of segments and be able to remove them without any problems
+    // .getElementsByClassName() to create a live NodeList and be able to check it changing length
+    document.querySelectorAll('.segment-button').forEach(seg => seg.click())
+    const segments = document.getElementsByClassName('segment-button')
+    setInterval(() => {
+      if (!segments.length) {
+        localStorage.setItem('clickNext', true)
+        setTimeout(() => window.location.reload(), 500)
+      }
+    }, 100)
+  }
 
   nextButton.addEventListener('click', e => {
     document.querySelectorAll('.segment-button').forEach(segment => segment.click())
-
+    if (clickCounter === refreshEvery) {
+      return refresh()
+    }
     clickCounter++
     document.getElementById('kk-splitter-next-batch-batch-number').textContent = clickCounter
 
@@ -99,6 +113,10 @@ function addNextButton() {
       })
     }
   })
+  if (localStorage.getItem('clickNext') === 'true') {
+    localStorage.setItem('clickNext', false)
+    nextButton.click()
+  }
 
   
   saveLeftButton.addEventListener('click', () => {
@@ -176,6 +194,13 @@ function main() {
     }
   })
 
+  storage.get('kk-splitter-refresh-every').then(res => {
+    let val = res['kk-splitter-refresh-every']
+    if (val) {
+      refreshEvery = val
+    }
+  })
+
   storage.get('kk-splitter-stored').then(res => {
     let stored = res['kk-splitter-stored']
     if (stored) {
@@ -216,6 +241,7 @@ function main() {
       <textarea id="kk-splitter-input"></textarea>
       <div id="kk-splitter-button-wrapper">
         <button id="kk-splitter-add">Add</button><span id="kk-splitter-batch-size-label">Batch size</span><input id="kk-splitter-batch-size" />
+        <div id="kk-splitter-refresh-every-label">Refresh every <input id="kk-splitter-refresh-every" default=100> "Next" clicks</div>
         <button id="kk-splitter-get-stored">Get stored</button>
         <button id="kk-splitter-get-saved">Get saved</button>
         <button id="kk-splitter-clear-stored">Clear stored</button>
@@ -238,6 +264,7 @@ function main() {
 
   function setInitialValues() {
     document.getElementById('kk-splitter-batch-size').value = batchSize
+    document.getElementById('kk-splitter-refresh-every').value = refreshEvery
     setStoredCounter(numberOfStored)
     setSavedCounter(numberOfSaved)
   }
@@ -257,6 +284,24 @@ function main() {
       else {
         batchSize = val
         storage.set('kk-splitter-batch-size', batchSize)
+      }
+    })
+
+    document.getElementById('kk-splitter-refresh-every').addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10)
+
+      if (isNaN(val)) {
+        Dock.dialog({
+          id: 'kk-splitter-incorrect-refresh-every-dialog',
+          html: 'Incorrect value',
+          okLabel: 'OK',
+          okCallback: () => e.target.value = 20,
+          destroyAfterClosing: true
+        }).show()
+      }
+      else {
+        refreshEvery = val
+        storage.set('kk-splitter-refresh-every', refreshEvery)
       }
     })
 

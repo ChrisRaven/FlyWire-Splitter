@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Splitter
 // @namespace    KrzysztofKruk-FlyWire
-// @version      0.1.0.1
+// @version      0.2
 // @description  Splits large list of IDs to more managable batches
 // @author       Krzysztof Kruk
 // @match        https://ngl.flywire.ai/*

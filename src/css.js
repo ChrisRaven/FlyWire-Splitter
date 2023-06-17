@@ -57,7 +57,13 @@ function addCss() {
       margin: 0 5px 0 26px;
     }
 
-    #kk-splitter-manage-dialog #kk-splitter-batch-size {
+    #kk-splitter-refresh-every-label {
+      font-size: 14px;
+      margin: 10px 0;
+    }
+
+    #kk-splitter-manage-dialog #kk-splitter-batch-size,
+    #kk-splitter-manage-dialog #kk-splitter-refresh-every {
       height: 25px;
       width: 25px;
       text-align: center;
