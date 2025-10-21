@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Splitter
 // @namespace    KrzysztofKruk-FlyWire
-// @version      0.2
+// @version      0.2.1
 // @description  Splits large list of IDs to more managable batches
 // @author       Krzysztof Kruk
 // @match        https://ngl.flywire.ai/*
@@ -179,7 +179,8 @@ function setStillToDo(clear = false) {
 
 
   function addIds_(ids, layer) {
-  	layer.displayState.rootSegments.add(ids)
+    const uint64ids = ids.map(id => new Uint64(id))
+  	layer.displayState.rootSegments.add(uint64ids)
   }
 
 
@@ -361,7 +362,7 @@ let hiddenLayer
 
 function getIds(id) {
   let ids = document.getElementById(id).value
-  return ids.split(/[ ,\n]+/).filter(num => num).map(str => new Uint64(str))
+  return ids.split(/[ ,\n]+/).filter(id => id)
 }
 
 
