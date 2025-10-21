@@ -8,28 +8,38 @@
 // @match        https://edit.flywire.ai/*
 // @connect      prodv1.flywire-daf.com
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/ChrisRaven/FlyWire-Splitter/main/Splitter.user.js
-// @downloadURL  https://raw.githubusercontent.com/ChrisRaven/FlyWire-Splitter/main/Splitter.user.js
+// @updateURL    https://raw.githubusercontent.com/ChrisRaven/FlyWire-Splitter/with-Prev/Splitter.user.js
+// @downloadURL  https://raw.githubusercontent.com/ChrisRaven/FlyWire-Splitter/with-Prev/Splitter.user.js
 // @homepageURL  https://github.com/ChrisRaven/FlyWire-Splitter
 // ==/UserScript==
+/*global Dock, BigInt, viewer, Uint64 */
+/*eslint no-return-assign: "off"*/
 
 let storage
+let currentPosition = 0
 let batchSize = 20
-let numberOfStored = 0
 let numberOfSaved = 0
 let refreshEvery = 100
+let ids = []
+const numberOfPreloadedBatches = 5
+let nextButton, prevButton
+
 function addCss() {
   Dock.addCss(/*css*/`
     /* "Next" button */
     #kk-splitter-next-wrapper {
       position: absolute;
       z-index: 50;
-      width: 250px;
+      width: 220px;
       height: 90px;
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
     }
 
     #kk-splitter-next-batch,
-    #kk-splitter-save-left {
+    #kk-splitter-save-left,
+    #kk-splitter-prev {
       background-color: #449;
       color: orange;
       font-size: 28px;
@@ -38,20 +48,29 @@ function addCss() {
     }
 
     #kk-splitter-next-batch {
-      width: 150px;
+      width: 130px;
       height: 90px;
+      flex: 1;
     }
 
-    #kk-splitter-save-left {
-      width: 60px;
+    #kk-splitter-save-left,
+    #kk-splitter-prev {
+      width: 80px;
       height: 90px;
       font-size: 18px;
       position: relative;
-      top: 2px;
+    }
+
+    #kk-side-column {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      top: -9px;
     }
 
     #kk-splitter-next-batch:hover,
-    #kk-splitter-save-left:hover {
+    #kk-splitter-save-left:hover,
+    #kk-splitter-prev:hover {
       background-color: #669;
     }
 
@@ -136,19 +155,63 @@ if (!document.getElementById('dock-script')) {
 }
 
 // on the Next button
-function setTotalLength(ids) {
-  document.querySelector('#kk-splitter-next-batch-total-counter').textContent = `[${Math.ceil(ids.length / batchSize)}]`
+function setStillToDo(clear = false) {
+  const newValue = clear ? 0 : Math.ceil((ids.length - currentPosition) / batchSize)
+  document.querySelector('#kk-splitter-next-batch-total-counter').textContent = `[${newValue}]`
 }
+
+
+  function getLayer(name) {
+    if (!name) {
+      return viewer.selectedLayer.layer_.layer_
+    }
+
+    if (typeof name === 'string') {
+      return viewer.layerManager.getLayerByName(name).layer_
+    }
+
+    if (typeof name === 'object') {
+      return name
+    }
+
+    return console.log('Incorrect format of the layer')
+  }
+
+
+  function addIds_(ids, layer) {
+  	layer.displayState.rootSegments.add(ids)
+  }
+
+
+  function addIds(ids, layerName) {
+    const layer = getLayer(layerName)
+    layer.displayState.rootSegments.clear()
+    addIds_(ids, layer)
+  }
+
+  function clearLayer(layerName) {
+    const layer = getLayer(layerName)
+    layer.displayState.rootSegments.clear()
+  }
+
 
 function addNextButton() {
   const nextButtonWrapper = document.createElement('div')
   nextButtonWrapper.id = 'kk-splitter-next-wrapper'
   nextButtonWrapper.draggable = true
 
-  const nextButton = document.createElement('button')
+  prevButton = document.createElement('button')
+  prevButton.id = 'kk-splitter-prev'
+  prevButton.innerHTML = 'Prev'
+  prevButton.addEventListener('contextmenu', e => e.preventDefault())
+
+  nextButton = document.createElement('button')
   nextButton.id = 'kk-splitter-next-batch'
   nextButton.innerHTML = 'Next (<span id="kk-splitter-next-batch-batch-number">0</span>)<br /><span id="kk-splitter-next-batch-total-counter">[?]</span>'
   nextButton.addEventListener('contextmenu', e => e.preventDefault())
+
+  const sideColumn = document.createElement('div')
+  sideColumn.id = 'kk-side-column'
 
   const saveLeftButton = document.createElement('button')
   saveLeftButton.id = 'kk-splitter-save-left'
@@ -156,12 +219,14 @@ function addNextButton() {
   saveLeftButton.addEventListener('contextmenu', e => e.preventDefault())
 
   nextButtonWrapper.appendChild(nextButton)
-  nextButtonWrapper.appendChild(saveLeftButton)
+  nextButtonWrapper.appendChild(sideColumn)
+  sideColumn.appendChild(prevButton)
+  sideColumn.appendChild(saveLeftButton)
   document.body.appendChild(nextButtonWrapper)
 
-  storage.get('kk-splitter-next-button-position').then(res => {
+  storage.get('kk-fw-splitter-next-button-position').then(res => {
     let top, left
-    let position = res['kk-splitter-next-button-position']
+    let position = res['kk-fw-splitter-next-button-position']
     if (!position) {
       top = 300
       left = 300
@@ -177,91 +242,84 @@ function addNextButton() {
 
   let clickCounter = 0
 
-  storage.get('kk-splitter-stored').then(res => {
-    let ids = res['kk-splitter-stored'] || []
-    setTotalLength(ids)
-  })
 
   function refresh() {
-    // .querySelectorAll() to create a static NodeList of segments and be able to remove them without any problems
-    // .getElementsByClassName() to create a live NodeList and be able to check it changing length
-    document.querySelectorAll('.segment-button').forEach(seg => seg.click())
-    const segments = document.getElementsByClassName('segment-button')
-    setInterval(() => {
-      if (!segments.length) {
-        localStorage.setItem('clickNext', true)
-        setTimeout(() => window.location.reload(), 500)
-      }
-    }, 100)
+    clearLayer()
+    localStorage.setItem('clickNext', true)
+    setTimeout(() => window.location.reload(), 0) // TODO: check if still necessary to timeout
   }
 
+
+  function getCurrentBatch() {
+    const currentEndPosition = currentPosition + batchSize
+    const batch = ids.slice(currentPosition, currentEndPosition)
+    clearLayer()
+
+    if (!batch.length) {
+      return Dock.dialog({
+        id: 'kk-splitter-no-ids',
+        html: 'All IDs have been checked',
+        destroyAfterClosing: true,
+        okLabel: 'OK',
+        okCallback: () => {}
+      }).show()
+
+    }
+    else {
+      setStillToDo()
+      const nextBatch = ids.slice(currentEndPosition, currentEndPosition + batchSize * numberOfPreloadedBatches) // preloading dla "numberOfPreloadedBatches" następnych porcji
+      hiddenLayer.displayState.rootSegments.clear()
+      if (nextBatch && nextBatch.length && clickCounter + numberOfPreloadedBatches - 1 <= refreshEvery) {
+        addIds(nextBatch, hiddenLayer)
+      }
+      addIds(batch)
+    }
+
+    currentPosition += batchSize
+    storage.set('kk-fw-splitter-current-position', currentPosition)
+    setStillToDo()
+    document.getElementById('kk-splitter-next-batch-batch-number').textContent = clickCounter
+  }
+
+
   nextButton.addEventListener('click', e => {
-    document.querySelectorAll('.segment-button').forEach(segment => segment.click())
     if (clickCounter === refreshEvery) {
       return refresh()
     }
     clickCounter++
-    document.getElementById('kk-splitter-next-batch-batch-number').textContent = clickCounter
+    getCurrentBatch()
+  })
 
-    storage.get('kk-splitter-stored').then(res => {
-      let ids = res['kk-splitter-stored'] || []
-      getCb(ids)
-    })
-
-    function getCb(ids) {
-      const batch = ids.splice(0, batchSize)
-
-      if (!batch.length) {
-        return Dock.dialog({
-          id: 'kk-splitter-no-ids',
-          html: 'All IDs have been checked',
-          destroyAfterClosing: true,
-          okLabel: 'OK',
-          okCallback: () => {}
-        }).show()
-      }
-      else {
-        setTotalLength(ids)
-        numberOfStored = ids.length
-      }
-
-      const addSegmentsInput = document.querySelector('.add-segment input')
-      addSegmentsInput.value = batch.join(',')
-      
-      const submitEvent = new CustomEvent('submit')
-      document.getElementsByClassName('add-segment')[0].dispatchEvent(submitEvent)
-
-      storage.set('kk-splitter-stored', ids).then(() => {
-        numberOfStored = ids.length
-      })
+  prevButton.addEventListener('click', e => {
+    currentPosition -= batchSize * 2
+    if (currentPosition < 0) {
+      currentPosition = 0
+      // we have to save the currentPosition only here, because in the other branch, the getCurrentBatch() will already do it for us
+      storage.set('kk-fw-splitter-current-position', currentPosition)
+    }
+    else {
+      clickCounter--
+      getCurrentBatch()
     }
   })
-  if (localStorage.getItem('clickNext') === 'true') {
-    localStorage.setItem('clickNext', false)
-    nextButton.click()
-  }
 
-  
+
   saveLeftButton.addEventListener('click', () => {
-    const newIds = []
-    const segments = document.querySelectorAll('.segment-button')
-    segments.forEach(seg => newIds.push(seg.dataset.segId))
-    let ids = []
+    const newIds = getLayer().displayState.rootSegments.toJSON()
+    let savedIds = []
 
     if (!newIds || !newIds.length) return
 
-    storage.get('kk-splitter-saved').then(res => {
-      ids = res['kk-splitter-saved'] || []
-      let batch = newIds.splice(0, 10000)
-      do {
-      ids.push(...batch)
-      batch = newIds.splice(0, 10000)
-      }
-      while (batch.length > 0)
+    storage.get('kk-fw-splitter-saved').then(res => {
+      savedIds = res['kk-fw-splitter-saved'] || []
 
-      storage.set('kk-splitter-saved', ids).then(() => {
-        segments.forEach(seg => seg.click())
-        numberOfSaved = ids.length
+      let batch
+      while ((batch = newIds.splice(0, 10000)).length) {
+        savedIds.push(...batch)
+      }
+
+      storage.set('kk-fw-splitter-saved', savedIds).then(() => {
+        clearLayer()
       })
     })
   })
@@ -292,17 +350,18 @@ function addNextButton() {
   })
 
   nextWrapper.addEventListener('mouseup', e => {
-    if (e.button !== 2) return    
+    if (e.button !== 2) return
 
     moving = false
-    storage.set('kk-splitter-next-button-position', {x: currentX, y: currentY})
+    storage.set('kk-fw-splitter-next-button-position', {x: currentX, y: currentY})
   })
 }
 
+let hiddenLayer
 
 function getIds(id) {
   let ids = document.getElementById(id).value
-  return ids.split(/[ ,\n]+/).map(str => BigInt(str)).filter(num => num !== BigInt(0)) // source: ChatGPT
+  return ids.split(/[ ,\n]+/).filter(num => num).map(str => new Uint64(str))
 }
 
 
@@ -310,33 +369,63 @@ function main() {
   let dock = new Dock()
   storage = window.Sifrr.Storage.getStorage('indexeddb')
 
-  storage.get('kk-splitter-batch-size').then(res => {
-    let size = res['kk-splitter-batch-size']
+  storage.get('kk-fw-splitter-current-position').then(res => {
+    let curPos = res['kk-fw-splitter-current-position']
+    if (curPos) {
+      currentPosition = curPos
+    }
+  })
+
+  storage.get('kk-fw-splitter-batch-size').then(res => {
+    let size = res['kk-fw-splitter-batch-size']
     if (size) {
       batchSize = size
     }
   })
 
-  storage.get('kk-splitter-refresh-every').then(res => {
-    let val = res['kk-splitter-refresh-every']
+  storage.get('kk-fw-splitter-refresh-every').then(res => {
+    let val = res['kk-fw-splitter-refresh-every']
     if (val) {
       refreshEvery = val
     }
   })
 
-  storage.get('kk-splitter-stored').then(res => {
-    let stored = res['kk-splitter-stored']
+  storage.get('kk-fw-splitter-stored').then(res => {
+    let stored = res['kk-fw-splitter-stored']
     if (stored) {
-      numberOfStored = stored.length
+      ids = stored
+      setStillToDo()
+
+      if (localStorage.getItem('clickNext') === 'true') {
+        localStorage.setItem('clickNext', false)
+        const checkForLayer = setInterval(() => {
+          if (viewer && viewer.selectedLayer && viewer.selectedLayer.layer_.layer_.displayState) {
+            clearInterval(checkForLayer)
+            document.getElementById('kk-splitter-next-batch').click()
+          }
+        }, 100)
+      }
     }
   })
 
-  storage.get('kk-splitter-saved').then(res => {
-    let saved = res['kk-splitter-saved']
+  storage.get('kk-fw-splitter-saved').then(res => {
+    let saved = res['kk-fw-splitter-saved']
     if (saved) {
       numberOfSaved = saved.length
     }
   })
+
+  const checkForViewer = setInterval(() => {
+    if (!viewer) return
+
+    clearInterval(checkForViewer)
+    initHiddenLayer()
+  }, 100)
+
+  function initHiddenLayer() {
+    // TODO: dodać dodawanie warstwy, jeśli nie istnieje
+    hiddenLayer = getLayer(' ')
+  }
 
   dock.addAddon({
     name: 'Splitter',
@@ -359,6 +448,15 @@ function main() {
     }).show()
   })
 
+  document.body.addEventListener('keyup', e => {
+    if ((e.key === 'x' || e.key === 'X') && !e.ctrlKey && !e.shiftKey) {
+      nextButton.click()
+    }
+    else if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.shiftKey) {
+      prevButton.click()
+    }
+  })
+
   function getSplitterDialogHtml() {
     return /*html*/`
       <textarea id="kk-splitter-input"></textarea>
@@ -375,9 +473,8 @@ function main() {
     `
   }
 
-  function setStoredCounter(val) {
-    document.getElementById('kk-splitter-stored-counter').textContent = val
-    numberOfStored =  val
+  function setTotalLength() {
+    document.getElementById('kk-splitter-stored-counter').textContent = ids.length
   }
 
   function setSavedCounter(val) {
@@ -388,7 +485,7 @@ function main() {
   function setInitialValues() {
     document.getElementById('kk-splitter-batch-size').value = batchSize
     document.getElementById('kk-splitter-refresh-every').value = refreshEvery
-    setStoredCounter(numberOfStored)
+    setTotalLength()
     setSavedCounter(numberOfSaved)
   }
 
@@ -406,7 +503,7 @@ function main() {
       }
       else {
         batchSize = val
-        storage.set('kk-splitter-batch-size', batchSize)
+        storage.set('kk-fw-splitter-batch-size', batchSize)
       }
     })
 
@@ -424,29 +521,29 @@ function main() {
       }
       else {
         refreshEvery = val
-        storage.set('kk-splitter-refresh-every', refreshEvery)
+        storage.set('kk-fw-splitter-refresh-every', refreshEvery)
       }
     })
 
 
     document.getElementById('kk-splitter-add').addEventListener('click', () => {
-      const ids = getIds('kk-splitter-input')
+      const newIds = getIds('kk-splitter-input')
       let stored
-      storage.get('kk-splitter-stored').then(res => {
-        stored = res['kk-splitter-stored'] || []
+      storage.get('kk-fw-splitter-stored').then(res => {
+        stored = res['kk-fw-splitter-stored'] || []
 
-        let batch = ids.splice(0, 10000)
+        let batch = newIds.splice(0, 10000)
         do {
         stored.push(...batch)
-        batch = ids.splice(0, 10000)
+        batch = newIds.splice(0, 10000)
         }
         while (batch.length > 0)
 
-        storage.set('kk-splitter-stored', stored)
+        storage.set('kk-fw-splitter-stored', stored)
       }).then(() => {
-        numberOfStored = stored.length
-        setStoredCounter(stored.length)
-        setTotalLength(stored)
+        ids = [...stored]
+        setTotalLength()
+        setStillToDo()
       })
 
       document.getElementById('kk-splitter-input').value = ''
@@ -454,8 +551,8 @@ function main() {
 
 
     document.getElementById('kk-splitter-get-stored').addEventListener('click', () => {
-      storage.get('kk-splitter-stored').then(res => {
-        const ids = res['kk-splitter-stored'] || []
+      storage.get('kk-fw-splitter-stored').then(res => {
+        const ids = res['kk-fw-splitter-stored'] || []
         navigator.clipboard.writeText(ids.join(',')).then(() => {
           Dock.dialog({
             id: 'kk-splitter-get-stored-dialog',
@@ -465,10 +562,10 @@ function main() {
             destroyAfterClosing: true
           }).show()
         })
-        
+
       })
     })
-  
+
 
     document.getElementById('kk-splitter-clear-stored').addEventListener('click', () => {
       Dock.dialog({
@@ -482,7 +579,7 @@ function main() {
       }).show()
 
       function okCallback() {
-        storage.del('kk-splitter-stored').then(() => {
+        storage.del('kk-fw-splitter-stored').then(() => {
           Dock.dialog({
             id: 'kk-splitter-clear-stored-confirmed-dialog',
             html: 'The stored IDs have been removed',
@@ -490,16 +587,19 @@ function main() {
             okLabel: 'OK',
             destroyAfterClosing: true
           }).show()
-          setStoredCounter(0)
-          setTotalLength([]) // the function expects an array and takes its length, so we're passing an empty array to set the length to 0
+          ids = []
+          currentPosition = 0
+          storage.set('kk-fw-splitter-current-position', currentPosition)
+          setTotalLength()
+          setStillToDo(true)
         })
       }
     })
 
 
     document.getElementById('kk-splitter-get-saved').addEventListener('click', () => {
-      storage.get('kk-splitter-saved').then(res => {
-        const ids = res['kk-splitter-saved'] || []
+      storage.get('kk-fw-splitter-saved').then(res => {
+        const ids = res['kk-fw-splitter-saved'] || []
         navigator.clipboard.writeText(ids.join(',')).then(() => {
           Dock.dialog({
             id: 'kk-splitter-get-saved-dialog',
@@ -509,10 +609,10 @@ function main() {
             destroyAfterClosing: true
           }).show()
         })
-        
+
       })
     })
-  
+
 
     document.getElementById('kk-splitter-clear-saved').addEventListener('click', () => {
       Dock.dialog({
@@ -526,7 +626,7 @@ function main() {
       }).show()
 
       function okCallback() {
-        storage.del('kk-splitter-saved').then(() => {
+        storage.del('kk-fw-splitter-saved').then(() => {
           Dock.dialog({
             id: 'kk-splitter-clear-saved-confirmed-dialog',
             html: 'The saved IDs have been removed',
@@ -540,3 +640,4 @@ function main() {
     })
   }
 }
+
